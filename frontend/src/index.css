@@ -1,0 +1,112 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", Consolas, "SF Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #040508;
+  overflow: hidden;
+}
+
+.hud-title {
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #6fd3ff;
+  margin-bottom: 6px;
+}
+
+.btn {
+  background: rgba(90, 170, 220, 0.12);
+  border: 1px solid rgba(90, 170, 220, 0.4);
+  color: #d9ecf5;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.btn:hover {
+  background: rgba(90, 170, 220, 0.25);
+}
+
+.compare-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.compare-panel {
+  background: rgba(8, 12, 18, 0.96);
+  border: 1px solid rgba(90, 170, 220, 0.35);
+  border-radius: 8px;
+  padding: 20px 24px;
+  width: 560px;
+  max-width: 90vw;
+  color: #d9ecf5;
+  font-size: 13px;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.compare-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.compare-status {
+  padding: 12px 0;
+  color: #9fc2d4;
+  font-size: 12px;
+}
+
+.compare-error {
+  color: #e0483f;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.compare-table th,
+.compare-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+.compare-table th {
+  color: #7fa8bb;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.compare-footnote {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #6c93a6;
+  line-height: 1.5;
+}
+
+.compare-footnote code,
+.compare-status code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}

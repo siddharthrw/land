@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Training artifacts (large/noisy, not source)
+backend/train*.log
+backend/server.log
+backend/_finetune_tmp.py
+models/*.zip
+
+# Editor/OS
+.DS_Store
+
+# This project's scratch area
+scratchpad/
+logs/
