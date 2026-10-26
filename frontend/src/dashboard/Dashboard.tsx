@@ -3,6 +3,7 @@ import { useMissionStore } from "../store/missionStore";
 import { deriveTelemetry, formatPhase } from "../utils/telemetry";
 import { LunarSurfaceView } from "./LunarSurfaceView";
 import { useSmoothed } from "./useSmoothed";
+import { useFlightLogger, formatFlightLog } from "./useFlightLog";
 import { ActionFeedPanel, DecisionLogPanel, ScorePanel, ThrustMonitorPanel } from "./BottomPanels";
 import "./dashboard.css";
 
@@ -39,6 +40,19 @@ export function Dashboard() {
   const [manualThrottle, setManualThrottle] = useState(0.3);
   const [manualTilt, setManualTilt] = useState(0);
   const utc = useUtcClock();
+  const flightLogRef = useFlightLogger();
+  const [logCopied, setLogCopied] = useState(false);
+
+  const copyFlightLog = async () => {
+    const text = formatFlightLog(flightLogRef.current);
+    try {
+      await navigator.clipboard.writeText(text);
+      setLogCopied(true);
+      setTimeout(() => setLogCopied(false), 2000);
+    } catch {
+      // clipboard API unavailable (e.g. insecure context) -- nothing to fall back to here
+    }
+  };
 
   useEffect(() => {
     connect();
@@ -91,6 +105,9 @@ export function Dashboard() {
               {canResume && <button className="dash-btn" onClick={resume}>RESUME</button>}
               <button className="dash-btn" onClick={restart}>RESTART</button>
               <button className="dash-btn" onClick={toggleComparePanel}>COMPARE PILOTS</button>
+              <button className="dash-btn" onClick={copyFlightLog}>
+                {logCopied ? "COPIED!" : `COPY DEBUG LOG (${flightLogRef.current.length})`}
+              </button>
             </div>
 
             <div className="dash-divider" />
