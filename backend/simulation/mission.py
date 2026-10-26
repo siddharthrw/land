@@ -13,6 +13,21 @@ from agents import baseline
 from simulation import physics, rewards
 from simulation.physics import DescentState
 
+# The bounds the *live* PPO checkpoint was actually trained within (not tied
+# to lunar_env.py's training-range constants, which have since changed for
+# newer experiments) -- a verified physics sweep confirmed PPO's reliability
+# collapses once it's pushed outside what it's actually practiced. Rather
+# than pretend a small learned network can safely handle any input, PPO only
+# flies inside this box; baseline (a plain formula, reliable at any input)
+# takes over instantly whenever the lander drifts outside it, and PPO
+# resumes the moment it's back in range.
+PPO_TRUSTED_MAX_ALTITUDE = 2200.0
+PPO_TRUSTED_MAX_OFFSET = 550.0
+
+
+def _in_ppo_comfort_zone(state: DescentState) -> bool:
+    return state.y <= PPO_TRUSTED_MAX_ALTITUDE and abs(state.x) <= PPO_TRUSTED_MAX_OFFSET
+
 # --- Phases -----------------------------------------------------------------
 
 PRELAUNCH = "PRELAUNCH"
@@ -162,13 +177,17 @@ class MissionStateMachine:
             throttle_cmd, tilt_cmd = self.manual_input
             reason = "Manual control."
         elif self.active_controller == "ppo" and self._ppo_model is not None:
-            import numpy as np
-            from simulation.lunar_env import observation_from_state
-            obs = observation_from_state(state)
-            action, _ = self._ppo_model.predict(np.array(obs, dtype="float32"), deterministic=True)
-            throttle_cmd = float((action[0] + 1.0) / 2.0)
-            tilt_cmd = float(action[1]) * physics.TILT_LIMIT_RAD
-            reason = "PPO policy output."
+            if _in_ppo_comfort_zone(state):
+                import numpy as np
+                from simulation.lunar_env import observation_from_state
+                obs = observation_from_state(state)
+                action, _ = self._ppo_model.predict(np.array(obs, dtype="float32"), deterministic=True)
+                throttle_cmd = float((action[0] + 1.0) / 2.0)
+                tilt_cmd = float(action[1]) * physics.TILT_LIMIT_RAD
+                reason = "PPO policy output."
+            else:
+                throttle_cmd, tilt_cmd, baseline_reason = baseline.compute_action(state)
+                reason = f"[Safety fallback — outside PPO's trained range] {baseline_reason}"
         else:
             throttle_cmd, tilt_cmd, reason = baseline.compute_action(state)
 

@@ -21,10 +21,13 @@ from simulation import physics, rewards
 from simulation.physics import DescentState
 
 DT = 1.0 / 20.0
-# A full descent from the top of the randomized altitude range (2200 m) can
-# take ~165s of simulated time even under good control; 3600 steps (180s)
-# gives headroom so episodes terminate on a real outcome, not a timeout.
-MAX_STEPS = 3600
+# Baseline deliberately descends gently (never faster than 18 m/s), so a
+# full descent from the top of the randomized altitude range (2600 m) can
+# take ~175-200s even flown well. A verified physics sweep (see
+# conversation history / README) confirmed episodes that looked
+# "unrecoverable" at a lower cap were actually just cut off before a real
+# outcome happened -- not real crashes. 4500 steps (225s) gives real margin.
+MAX_STEPS = 4500
 
 
 OBS_CLIP = 5.0
@@ -63,8 +66,17 @@ if gym is not None:
             super().reset(seed=seed)
             rng = random.Random(seed)
             if self.randomize:
-                alt = rng.uniform(1200.0, 2200.0)
-                offset = rng.uniform(-550.0, 550.0)
+                # Matches the actual physically-recoverable envelope, found
+                # by sweeping baseline across a wide grid of starting
+                # positions/altitudes rather than guessed: below ~1000m
+                # altitude the safe sideways range narrows (not enough time
+                # left to correct a big drift against the ~28deg tilt
+                # limit), and nothing lands past about +-1000m offset at any
+                # altitude -- that's a hard physical wall, not a skill gap.
+                # Training on a range that includes genuinely unrecoverable
+                # starts would just teach it to imitate failure.
+                alt = rng.uniform(1100.0, 2600.0)
+                offset = rng.uniform(-850.0, 850.0)
             else:
                 alt = physics.INITIAL_ALTITUDE
                 offset = physics.INITIAL_HORIZONTAL_OFFSET

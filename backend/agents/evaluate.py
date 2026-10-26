@@ -20,8 +20,8 @@ def _run_episode(seed: int, controller: str, model=None):
     import random
 
     rng = random.Random(seed)
-    alt = rng.uniform(1200.0, 2200.0)
-    offset = rng.uniform(-550.0, 550.0)
+    alt = rng.uniform(1100.0, 2600.0)
+    offset = rng.uniform(-850.0, 850.0)
     state = physics.initial_descent_state(seed_offset_x=offset, seed_altitude=alt)
 
     for _ in range(MAX_STEPS):
