@@ -2,8 +2,12 @@
 
 No training required — always available, used as the default controller and
 as the fallback whenever no trained PPO checkpoint is present. Pure function
-of the current descent state; produces (throttle, tilt_cmd, reason) so the
+of the current descent state; produces (throttle, rcs_cmd, reason) so the
 decision log can show a truthful, telemetry-derived explanation.
+
+Vertical (main engine) and lateral (RCS) are fully independent now -- no
+more coupling through a gimbal angle -- so each gets its own clean control
+law with no need to borrow authority from the other.
 """
 from __future__ import annotations
 
@@ -15,14 +19,7 @@ from simulation.physics import DescentState
 # Gains, tuned by hand for the physics constants in physics.py.
 VY_TARGET_GAIN = 0.65     # how aggressively descent speed scales with altitude
 VY_KP = 0.9
-VY_KD = 0.0
 MIN_TIME_TO_GO = 2.5  # s, floor to keep the 1/T^2 term from blowing up near the ground
-# Was capped well below the vehicle's real tilt capability
-# (physics.TILT_LIMIT_RAD, 28deg) -- fine for normal drift, but it meant
-# the controller was out of turning authority (saturated at this cap more
-# than half the time) exactly when an abnormally large sideways speed
-# needed more of it, not less.
-TILT_FROM_LATERAL_LIMIT = math.radians(26.0)
 
 HOVER_THROTTLE = (physics.DRY_MASS + physics.FUEL_MASS_INITIAL * 0.5) * physics.LUNAR_G / physics.MAX_THRUST
 
@@ -34,9 +31,9 @@ def desired_descent_rate(altitude: float) -> float:
 
 def estimate_time_to_go(state: DescentState) -> float:
     """How many seconds until touchdown, at the current vertical rate. If
-    not meaningfully descending yet (e.g. still climbing right after an
-    extreme manual input), fall back to the normal guidance curve's implied
-    rate instead of letting a near-zero/positive vy blow up the estimate."""
+    not meaningfully descending yet, fall back to the normal guidance
+    curve's implied rate instead of letting a near-zero/positive vy blow up
+    the estimate."""
     if state.vy < -0.5:
         return state.y / (-state.vy)
     ideal_vy = desired_descent_rate(state.y)
@@ -45,14 +42,11 @@ def estimate_time_to_go(state: DescentState) -> float:
 
 def lateral_accel_command(state: DescentState, time_to_go: float) -> float:
     """The acceleration needed RIGHT NOW to drive both lateral position and
-    lateral velocity to zero exactly when time_to_go runs out. This is a
-    standard terminal-guidance law (the same shape used in real powered-
-    descent guidance, e.g. Apollo's lunar module) — solving the two-point
-    boundary problem "x(T)=0, v(T)=0" for a smoothly-varying acceleration
-    gives a = -6x/T^2 - 4*vx/T. Unlike a plain position-error controller,
-    this naturally weights "close the distance" against "kill the speed" by
-    how much time is actually left, instead of always maximizing one and
-    only noticing the other once it's nearly out of room.
+    lateral velocity to zero exactly when time_to_go runs out -- the same
+    terminal-guidance law used in real powered-descent guidance (e.g.
+    Apollo's lunar module). Solving the two-point boundary problem
+    "x(T)=0, v(T)=0" for a smoothly-varying acceleration gives
+    a = -6x/T^2 - 4*vx/T.
     """
     T = max(MIN_TIME_TO_GO, time_to_go)
     return -6.0 * state.x / (T * T) - 4.0 * state.vx / T
@@ -75,38 +69,18 @@ def compute_action(state: DescentState) -> tuple[float, float, str]:
 
     time_to_go = estimate_time_to_go(state)
     a_lateral = lateral_accel_command(state, time_to_go)
-    # Tilting the engine only produces sideways thrust if there's actual
-    # thrust to tilt -- at zero throttle, any angle gives zero lateral
-    # force. A real flight log showed exactly this: cutting throttle to
-    # ~0 to arrest a climb left zero steering authority for ~40 seconds
-    # while a huge sideways speed went uncorrected, because the lateral law
-    # had no power to act on. Make sure there's always enough throttle to
-    # actually deliver the lateral correction this instant calls for, even
-    # if the vertical profile alone would have picked less.
-    required_thrust = abs(a_lateral) * mass / math.sin(TILT_FROM_LATERAL_LIMIT)
-    min_throttle_for_lateral = min(physics.MAX_THROTTLE, required_thrust / physics.MAX_THRUST)
-    throttle = max(throttle, min_throttle_for_lateral)
+    # RCS is independent of the main engine now -- straight conversion from
+    # required acceleration to thrust fraction, no gimbal geometry, no
+    # borrowing throttle from the vertical law.
+    rcs_cmd = a_lateral * mass / physics.RCS_MAX_THRUST
+    rcs_cmd = min(1.0, max(-1.0, rcs_cmd))
 
-    thrust = max(1.0, throttle * physics.MAX_THRUST)
-    # sin(theta) = required lateral accel * mass / available thrust — how
-    # much the thrust vector needs to tilt to produce that acceleration.
-    sin_theta = max(-1.0, min(1.0, a_lateral * mass / thrust))
-    tilt_cmd = math.asin(sin_theta)
-    tilt_cmd = min(TILT_FROM_LATERAL_LIMIT, max(-TILT_FROM_LATERAL_LIMIT, tilt_cmd))
-
-    # Fading out tilt authority near the ground made sense for the old
-    # position-only controller (avoid a last-second flip on tiny residual
-    # drift), but it actively fights the new time-aware law exactly when a
-    # real velocity error still needs correcting close to the ground --
-    # confirmed by a real flight log where a 65 m/s leftover sideways speed
-    # at 10m altitude got its correction capped to near-zero by this, and
-    # crashed on pure horizontal speed with a perfect vertical approach.
-    # Only fade when there's barely any error left to correct anyway.
-    if altitude < 10.0 and abs(state.vx) < 3.0 and abs(state.x) < 10.0:
-        tilt_cmd *= max(0.0, altitude / 10.0)
-
+    if state.fuel_mass <= 0.0 and state.rcs_fuel_mass <= 0.0:
+        return 0.0, 0.0, "Main fuel and RCS both depleted — no propulsion remaining."
     if state.fuel_mass <= 0.0:
-        return 0.0, 0.0, "Fuel depleted — engine cannot fire."
+        return 0.0, rcs_cmd, "Main fuel depleted — vertical braking lost, using RCS to stay centered on the way down."
+    if state.rcs_fuel_mass <= 0.0:
+        rcs_cmd = 0.0
 
     if altitude < 15.0 and abs(state.vy) < 3.0:
         reason = "Final approach: holding gentle descent rate for touchdown."
@@ -116,10 +90,10 @@ def compute_action(state: DescentState) -> tuple[float, float, str]:
             f"target envelope {vy_target:.1f} m/s."
         )
     elif abs(state.x) > 15.0:
-        reason = f"Reducing tilt to correct lateral drift of {state.x:.0f} m."
+        reason = f"RCS correcting lateral drift of {state.x:.0f} m."
     elif state.fuel_mass < physics.FUEL_MASS_INITIAL * 0.15:
         reason = "Fuel reserve is low; switching to a conservative descent profile."
     else:
         reason = "Tracking nominal descent profile."
 
-    return throttle, tilt_cmd, reason
+    return throttle, rcs_cmd, reason

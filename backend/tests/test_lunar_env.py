@@ -14,8 +14,9 @@ def test_env_passes_gymnasium_checker():
 
 def test_observation_is_always_within_bounds():
     extreme = physics.DescentState(
-        t=0, x=10000, y=50000, vx=500, vy=-500, theta=physics.TILT_LIMIT_RAD,
-        fuel_mass=physics.FUEL_MASS_INITIAL, throttle=1.0,
+        t=0, x=10000, y=50000, vx=500, vy=-500, theta=physics.COSMETIC_TILT_MAX,
+        fuel_mass=physics.FUEL_MASS_INITIAL, rcs_fuel_mass=physics.RCS_FUEL_MASS_INITIAL,
+        throttle=1.0, rcs_cmd=1.0,
     )
     obs = observation_from_state(extreme)
     assert all(-5.0 <= v <= 5.0 for v in obs)

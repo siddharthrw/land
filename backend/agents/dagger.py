@@ -51,9 +51,9 @@ def collect_student_rollout(model, n_episodes: int) -> tuple[np.ndarray, np.ndar
         done = False
         while not done:
             state = env.state
-            exp_throttle, exp_tilt, _ = baseline.compute_action(state)
+            exp_throttle, exp_rcs, _ = baseline.compute_action(state)
             expert_action = np.clip(
-                [exp_throttle * 2.0 - 1.0, exp_tilt / physics.TILT_LIMIT_RAD], -1.0, 1.0
+                [exp_throttle * 2.0 - 1.0, exp_rcs], -1.0, 1.0
             )
             obs_list.append(obs.tolist())
             act_list.append(expert_action.tolist())

@@ -15,6 +15,7 @@ FIXED_EVENT_POINTS: dict[str, int] = {
 
 MAX_CONTROLLED_DESCENT_POINTS = 150
 MAX_FUEL_EFFICIENCY_POINTS = 100
+MAX_RCS_EFFICIENCY_POINTS = 50
 MAX_LANDING_ACCURACY_POINTS = 100
 
 
@@ -23,11 +24,12 @@ def fixed_points(event_type: str) -> int:
 
 
 def controlled_descent_points(state: DescentState) -> int:
-    """Scored at touchdown: smoother terminal velocities score higher."""
+    """Scored at touchdown: smoother terminal velocities score higher. Tilt
+    is no longer part of this -- with the main engine fixed vertical and
+    RCS independent, theta is purely cosmetic now, not a safety signal."""
     vy_score = max(0.0, 1.0 - abs(state.vy) / physics.SAFE_VY)
     vx_score = max(0.0, 1.0 - abs(state.vx) / physics.SAFE_VX)
-    tilt_score = max(0.0, 1.0 - abs(state.theta) / physics.SAFE_TILT_RAD)
-    quality = (vy_score + vx_score + tilt_score) / 3.0
+    quality = (vy_score + vx_score) / 2.0
     return round(MAX_CONTROLLED_DESCENT_POINTS * quality)
 
 
@@ -37,6 +39,15 @@ def fuel_efficiency_points(state: DescentState) -> int:
     ideal = 0.15
     closeness = max(0.0, 1.0 - abs(remaining_fraction - ideal) / 0.5)
     return round(MAX_FUEL_EFFICIENCY_POINTS * closeness)
+
+
+def rcs_efficiency_points(state: DescentState) -> int:
+    """Separate from main-fuel efficiency -- rewards leaving RCS propellant
+    in reserve, since it's the "save it for a rainy day" backup system."""
+    if physics.RCS_FUEL_MASS_INITIAL <= 0:
+        return 0
+    remaining_fraction = state.rcs_fuel_mass / physics.RCS_FUEL_MASS_INITIAL
+    return round(MAX_RCS_EFFICIENCY_POINTS * remaining_fraction)
 
 
 def landing_accuracy_points(state: DescentState) -> int:
@@ -95,13 +106,14 @@ def shaping_reward(prev: DescentState, state: DescentState, outcome: str) -> flo
     # of a long episode into a signal present from the first frame.
     ideal_vy = baseline.desired_descent_rate(max(0.0, state.y))
     reward -= abs(state.vy - ideal_vy) * 0.06
-    reward -= abs(state.theta) * 0.3
-    # Penalizes *changing* tilt, not just holding one — without this, a
-    # policy that whips the tilt back and forth every tick scores the same
-    # as one that holds a steady angle, as long as the average magnitude is
-    # similar. This is what was producing the visible shaking: nothing ever
-    # told it that flip-flopping has a cost.
-    reward -= abs(state.theta - prev.theta) * 6.0
+    # RCS is a real, limited resource now (not a free gimbal angle), so its
+    # usage gets priced directly: a small continuous cost for firing it at
+    # all (encourages efficiency), plus a bigger cost for whipping it back
+    # and forth tick to tick (the same "flip-flopping" instability problem
+    # the old tilt-change penalty solved, now applied to the thing that
+    # actually costs propellant).
+    reward -= abs(state.rcs_cmd) * 0.15
+    reward -= abs(state.rcs_cmd - prev.rcs_cmd) * 4.0
     reward -= abs(state.vx - prev.vx) * 0.05
     reward -= 0.01
 

@@ -69,9 +69,9 @@ def generate_demos(n_episodes: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]
         done = False
         while not done:
             state = env.state
-            throttle, tilt_cmd, _ = baseline.compute_action(state)
+            throttle, rcs_cmd, _ = baseline.compute_action(state)
             action = np.array(
-                [throttle * 2.0 - 1.0, tilt_cmd / physics.TILT_LIMIT_RAD],
+                [throttle * 2.0 - 1.0, rcs_cmd],
                 dtype=np.float32,
             )
             action = np.clip(action, -1.0, 1.0)

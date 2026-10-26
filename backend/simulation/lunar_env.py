@@ -36,14 +36,17 @@ OBS_CLIP = 5.0
 def observation_from_state(state: DescentState) -> list[float]:
     altitude = max(0.0, state.y)
     fuel_fraction = state.fuel_mass / physics.FUEL_MASS_INITIAL
+    rcs_fuel_fraction = (
+        state.rcs_fuel_mass / physics.RCS_FUEL_MASS_INITIAL if physics.RCS_FUEL_MASS_INITIAL > 0 else 0.0
+    )
     raw = [
         altitude / physics.INITIAL_ALTITUDE,
         state.x / physics.INITIAL_HORIZONTAL_OFFSET,
         state.vy / 20.0,
         state.vx / 20.0,
         fuel_fraction,
-        state.theta / physics.TILT_LIMIT_RAD,
-        0.0,  # angular velocity placeholder (tilt is actuator-rate-limited, not a free DOF here)
+        rcs_fuel_fraction,
+        state.rcs_cmd,  # last applied RCS command, already in [-1, 1]
         state.x / physics.LANDING_RADIUS,
     ]
     return [max(-OBS_CLIP, min(OBS_CLIP, v)) for v in raw]
@@ -86,10 +89,10 @@ if gym is not None:
 
         def step(self, action):
             throttle_cmd = float((action[0] + 1.0) / 2.0)
-            tilt_cmd = float(action[1]) * physics.TILT_LIMIT_RAD
+            rcs_cmd = float(action[1])
 
             prev = self.state
-            self.state = physics.step_descent(prev, throttle_cmd, tilt_cmd, DT)
+            self.state = physics.step_descent(prev, throttle_cmd, rcs_cmd, DT)
             self.steps += 1
 
             outcome = physics.classify_outcome(self.state)

@@ -80,11 +80,14 @@ class MissionStateMachine:
     active_controller: str = "baseline"
     manual_input: tuple[float, float] | None = None
     sim_speed: int = 1
+    scenario_fuel_fraction: float = 1.0
+    scenario_rcs_fraction: float = 1.0
 
     descent_state: DescentState | None = None
     decision_log: list = field(default_factory=list)
     throttle: float = 0.0
     fuel_fraction: float = 1.0
+    rcs_fuel_fraction: float = 1.0
 
     _awarded: set = field(default_factory=set)
     _events: list = field(default_factory=list)
@@ -99,7 +102,12 @@ class MissionStateMachine:
 
     def handle_command(self, cmd_type: str, payload=None) -> None:
         if cmd_type == "launch" and self.phase == PRELAUNCH:
-            self.descent_state = physics.initial_descent_state()
+            self.descent_state = physics.initial_descent_state(
+                seed_fuel_fraction=self.scenario_fuel_fraction,
+                seed_rcs_fraction=self.scenario_rcs_fraction,
+            )
+            self.fuel_fraction = self.scenario_fuel_fraction
+            self.rcs_fuel_fraction = self.scenario_rcs_fraction
             self.phase = LUNAR_DESCENT
             self._phase_start = self.sim_time
             self._emit("DESCENT_START", "Descent engines ignited — beginning final approach.", 0)
@@ -122,9 +130,16 @@ class MissionStateMachine:
             else:
                 self.active_controller = payload
         elif cmd_type == "manual_input":
-            self.manual_input = (payload.get("throttle", 0.0), payload.get("tilt", 0.0))
+            self.manual_input = (payload.get("throttle", 0.0), payload.get("rcs", 0.0))
         elif cmd_type == "set_sim_speed":
             self.sim_speed = max(1, min(8, int(payload)))
+        elif cmd_type == "set_scenario" and self.phase == PRELAUNCH:
+            # Only honored before launch -- a scenario is "how this attempt
+            # starts," not something to change mid-flight.
+            if "fuelFraction" in payload:
+                self.scenario_fuel_fraction = max(0.05, min(1.0, float(payload["fuelFraction"])))
+            if "rcsFraction" in payload:
+                self.scenario_rcs_fraction = max(0.0, min(1.0, float(payload["rcsFraction"])))
 
     def reset(self) -> None:
         self.phase = PRELAUNCH
@@ -135,7 +150,11 @@ class MissionStateMachine:
         self.descent_state = None
         self.decision_log = []
         self.throttle = 0.0
-        self.fuel_fraction = 1.0
+        # Scenario settings (scenario_fuel_fraction/scenario_rcs_fraction)
+        # deliberately survive a restart -- it's "how THIS attempt starts,"
+        # not reset back to defaults each time.
+        self.fuel_fraction = self.scenario_fuel_fraction
+        self.rcs_fuel_fraction = self.scenario_rcs_fraction
         self._awarded = set()
         self._events = []
         self._phase_start = 0.0
@@ -186,7 +205,7 @@ class MissionStateMachine:
     def _step_lunar_descent(self, dt: float) -> None:
         state = self.descent_state
         if self.active_controller == "manual" and self.manual_input is not None:
-            throttle_cmd, tilt_cmd = self.manual_input
+            throttle_cmd, rcs_cmd = self.manual_input
             reason = "Manual control."
         elif self.active_controller == "ppo" and self._ppo_model is not None:
             if _in_ppo_comfort_zone(state):
@@ -195,24 +214,26 @@ class MissionStateMachine:
                 obs = observation_from_state(state)
                 action, _ = self._ppo_model.predict(np.array(obs, dtype="float32"), deterministic=True)
                 throttle_cmd = float((action[0] + 1.0) / 2.0)
-                tilt_cmd = float(action[1]) * physics.TILT_LIMIT_RAD
+                rcs_cmd = float(action[1])
                 reason = "PPO policy output."
             else:
-                throttle_cmd, tilt_cmd, baseline_reason = baseline.compute_action(state)
+                throttle_cmd, rcs_cmd, baseline_reason = baseline.compute_action(state)
                 reason = f"[Safety fallback — outside PPO's trained range] {baseline_reason}"
         else:
-            throttle_cmd, tilt_cmd, reason = baseline.compute_action(state)
+            throttle_cmd, rcs_cmd, reason = baseline.compute_action(state)
 
-        new_state = physics.step_descent(state, throttle_cmd, tilt_cmd, dt)
+        new_state = physics.step_descent(state, throttle_cmd, rcs_cmd, dt)
         self.descent_state = new_state
         self.throttle = new_state.throttle
         self.fuel_fraction = new_state.fuel_mass / physics.FUEL_MASS_INITIAL
+        self.rcs_fuel_fraction = new_state.rcs_fuel_mass / physics.RCS_FUEL_MASS_INITIAL
 
         self.decision_log.append({
             "simTime": round(self.sim_time, 1),
             "controller": self.active_controller,
             "throttle": round(new_state.throttle, 2),
             "tilt": round(math.degrees(new_state.theta), 1),
+            "rcsCmd": round(new_state.rcs_cmd, 2),
             "reason": reason,
         })
         if len(self.decision_log) > 40:
@@ -231,6 +252,10 @@ class MissionStateMachine:
             self._emit(
                 "FUEL_EFFICIENCY_BONUS", "Fuel-efficiency bonus.",
                 rewards.fuel_efficiency_points(new_state),
+            )
+            self._emit(
+                "RCS_EFFICIENCY_BONUS", "RCS reserve bonus.",
+                rewards.rcs_efficiency_points(new_state),
             )
             self._emit(
                 "LANDING_ACCURACY_BONUS", f"Landed {physics.distance_to_target(new_state):.0f} m from the target site.",
@@ -262,8 +287,13 @@ class MissionStateMachine:
             "vehicle": {
                 "attitude": [0.0, 0.0, state.theta if state else 0.0],
                 "fuelFraction": round(self.fuel_fraction, 4),
+                "rcsFuelFraction": round(self.rcs_fuel_fraction, 4),
                 "mass": physics.total_mass(state) if state else None,
                 "throttle": round(self.throttle, 3),
+            },
+            "scenario": {
+                "fuelFraction": round(self.scenario_fuel_fraction, 2),
+                "rcsFraction": round(self.scenario_rcs_fraction, 2),
             },
             "activeController": self.active_controller,
             "score": self.score,

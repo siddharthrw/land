@@ -31,11 +31,11 @@ def _run_episode(seed: int, controller: str, model=None):
             obs = np.array(observation_from_state(state), dtype="float32")
             action, _ = model.predict(obs, deterministic=True)
             throttle_cmd = float((action[0] + 1.0) / 2.0)
-            tilt_cmd = float(action[1]) * physics.TILT_LIMIT_RAD
+            rcs_cmd = float(action[1])
         else:
-            throttle_cmd, tilt_cmd, _ = baseline.compute_action(state)
+            throttle_cmd, rcs_cmd, _ = baseline.compute_action(state)
 
-        state = physics.step_descent(state, throttle_cmd, tilt_cmd, DT)
+        state = physics.step_descent(state, throttle_cmd, rcs_cmd, DT)
         outcome = physics.classify_outcome(state)
         if outcome != "FLYING":
             return outcome, state
@@ -59,6 +59,11 @@ def evaluate(controller: str, episodes: int, model=None) -> dict:
         ),
         "avgFuelUsedKg": (
             sum(physics.FUEL_MASS_INITIAL - s.fuel_mass for _, s in successes) / len(successes)
+            if successes
+            else None
+        ),
+        "avgRcsUsedKg": (
+            sum(physics.RCS_FUEL_MASS_INITIAL - s.rcs_fuel_mass for _, s in successes) / len(successes)
             if successes
             else None
         ),
