@@ -4,6 +4,7 @@ is intentional — see plan.md section 5.
 """
 from __future__ import annotations
 
+from agents import baseline
 from simulation import physics
 from simulation.physics import DescentState
 
@@ -86,6 +87,14 @@ def shaping_reward(prev: DescentState, state: DescentState, outcome: str) -> flo
     degenerate "fly away and never terminate" policy.
     """
     reward = (_potential(state) - _potential(prev)) * 8.0
+    # Dense "fly the known-good speed curve" signal: baseline already knows
+    # exactly what vertical speed is safe to be at for any given altitude
+    # (desired_descent_rate). Rather than only rewarding "did the final
+    # outcome work out", reward matching that curve on every single tick —
+    # this turns "learn to brake" from a one-shot discovery at the very end
+    # of a long episode into a signal present from the first frame.
+    ideal_vy = baseline.desired_descent_rate(max(0.0, state.y))
+    reward -= abs(state.vy - ideal_vy) * 0.06
     reward -= abs(state.theta) * 0.3
     # Penalizes *changing* tilt, not just holding one — without this, a
     # policy that whips the tilt back and forth every tick scores the same
