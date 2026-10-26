@@ -75,6 +75,18 @@ def compute_action(state: DescentState) -> tuple[float, float, str]:
 
     time_to_go = estimate_time_to_go(state)
     a_lateral = lateral_accel_command(state, time_to_go)
+    # Tilting the engine only produces sideways thrust if there's actual
+    # thrust to tilt -- at zero throttle, any angle gives zero lateral
+    # force. A real flight log showed exactly this: cutting throttle to
+    # ~0 to arrest a climb left zero steering authority for ~40 seconds
+    # while a huge sideways speed went uncorrected, because the lateral law
+    # had no power to act on. Make sure there's always enough throttle to
+    # actually deliver the lateral correction this instant calls for, even
+    # if the vertical profile alone would have picked less.
+    required_thrust = abs(a_lateral) * mass / math.sin(TILT_FROM_LATERAL_LIMIT)
+    min_throttle_for_lateral = min(physics.MAX_THROTTLE, required_thrust / physics.MAX_THRUST)
+    throttle = max(throttle, min_throttle_for_lateral)
+
     thrust = max(1.0, throttle * physics.MAX_THRUST)
     # sin(theta) = required lateral accel * mass / available thrust — how
     # much the thrust vector needs to tilt to produce that acceleration.
@@ -82,7 +94,15 @@ def compute_action(state: DescentState) -> tuple[float, float, str]:
     tilt_cmd = math.asin(sin_theta)
     tilt_cmd = min(TILT_FROM_LATERAL_LIMIT, max(-TILT_FROM_LATERAL_LIMIT, tilt_cmd))
 
-    if altitude < 10.0:
+    # Fading out tilt authority near the ground made sense for the old
+    # position-only controller (avoid a last-second flip on tiny residual
+    # drift), but it actively fights the new time-aware law exactly when a
+    # real velocity error still needs correcting close to the ground --
+    # confirmed by a real flight log where a 65 m/s leftover sideways speed
+    # at 10m altitude got its correction capped to near-zero by this, and
+    # crashed on pure horizontal speed with a perfect vertical approach.
+    # Only fade when there's barely any error left to correct anyway.
+    if altitude < 10.0 and abs(state.vx) < 3.0 and abs(state.x) < 10.0:
         tilt_cmd *= max(0.0, altitude / 10.0)
 
     if state.fuel_mass <= 0.0:

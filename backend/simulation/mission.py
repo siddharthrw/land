@@ -23,10 +23,22 @@ from simulation.physics import DescentState
 # resumes the moment it's back in range.
 PPO_TRUSTED_MAX_ALTITUDE = 2200.0
 PPO_TRUSTED_MAX_OFFSET = 550.0
+# Position alone isn't enough -- a real flight log showed position briefly
+# back "in range" while still carrying 66 m/s of sideways speed (left over
+# from an extreme manual input baseline hadn't fully arrested yet), got
+# handed to PPO anyway, and PPO -- never trained on speeds anywhere near
+# that -- flew it straight into the ground. A normal, well-behaved descent
+# never carries speeds like this, so gating on it costs nothing ordinary.
+PPO_TRUSTED_MAX_SPEED = 25.0
 
 
 def _in_ppo_comfort_zone(state: DescentState) -> bool:
-    return state.y <= PPO_TRUSTED_MAX_ALTITUDE and abs(state.x) <= PPO_TRUSTED_MAX_OFFSET
+    return (
+        state.y <= PPO_TRUSTED_MAX_ALTITUDE
+        and abs(state.x) <= PPO_TRUSTED_MAX_OFFSET
+        and abs(state.vx) <= PPO_TRUSTED_MAX_SPEED
+        and abs(state.vy) <= PPO_TRUSTED_MAX_SPEED
+    )
 
 # --- Phases -----------------------------------------------------------------
 
