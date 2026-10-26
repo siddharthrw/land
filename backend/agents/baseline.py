@@ -18,7 +18,23 @@ VY_KP = 0.9
 VY_KD = 0.0
 X_KP = 0.0065
 VX_KP = 0.11
-TILT_FROM_LATERAL_LIMIT = math.radians(22.0)
+# A normal drop never produces more than roughly +-15 m/s of sideways speed
+# on its own; much more than that only happens via manual flight or an
+# artificial scenario. Past that point, the plain P-controller below (tuned
+# for normal speeds) keeps commanding "push toward center" without
+# accounting for momentum it hasn't planned for, and overshoots straight
+# through the target, crashing on the far side instead of slowing to meet
+# it. This boosts the damping term specifically when speed is abnormally
+# high, so it prioritizes killing that excess speed before it keeps pushing
+# — normal flights (excess_speed == 0) are completely unaffected.
+VX_NORMAL_RANGE = 15.0
+VX_DAMPING_BOOST_GAIN = 0.45
+# Was capped well below the vehicle's real tilt capability
+# (physics.TILT_LIMIT_RAD, 28deg) -- fine for normal drift, but it meant
+# the controller was out of turning authority (saturated at this cap more
+# than half the time) exactly when an abnormally large sideways speed
+# needed more of it, not less.
+TILT_FROM_LATERAL_LIMIT = math.radians(26.0)
 
 HOVER_THROTTLE = (physics.DRY_MASS + physics.FUEL_MASS_INITIAL * 0.5) * physics.LUNAR_G / physics.MAX_THRUST
 
@@ -44,7 +60,9 @@ def compute_action(state: DescentState) -> tuple[float, float, str]:
     throttle = min(physics.MAX_THROTTLE, max(physics.MIN_THROTTLE, throttle))
 
     lateral_error = -state.x
-    tilt_cmd = X_KP * lateral_error - VX_KP * state.vx
+    excess_speed = max(0.0, abs(state.vx) - VX_NORMAL_RANGE)
+    damping_boost = 1.0 + excess_speed * VX_DAMPING_BOOST_GAIN
+    tilt_cmd = X_KP * lateral_error - VX_KP * damping_boost * state.vx
     tilt_cmd = min(TILT_FROM_LATERAL_LIMIT, max(-TILT_FROM_LATERAL_LIMIT, tilt_cmd))
 
     if altitude < 40.0:
